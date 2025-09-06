@@ -1,0 +1,145 @@
+//transmiter module//
+
+#include <SPI.h>              // include libraries 
+#include <Wire.h> 
+#include <LoRa.h> 
+#include <ZMPT101B.h> 
+  
+#define SENSITIVITY 500.0f 
+// ZMPT101B sensor output connected to analog pin A0 
+// and the voltage source frequency is 50 Hz. 
+ZMPT101B voltageSensor(A0, 50.0); 
+float correctionfactor=6.5; 
+float Current_Value = 0; 
+  
+const int ACPin = A1;         //set arduino signal read pin 
+#define ACTectionRange 20;    //set Non-invasive AC Current Sensor tection range (5A,10A,20A) 
+#define VREF 5 
+char watt[5]; 
+unsigned long last_time =0; 
+unsigned long current_time =0; 
+float Wh =0 ;   
+String outgoing;              // outgoing message 
+byte msgCount = 0;            // count of outgoing messages 
+byte localAddress = 0xBB;     // address of this device 
+byte destination = 0xFF;      // destination to send to 
+long lastSendTime = 0;        // last send time 
+int interval = 50;          // interval between sends 
+  
+String Mymessage = ""; 
+void setup() { 
+  Serial.begin(9600);                   // initialize serial 
+  Wire.begin(); 
+  voltageSensor.setSensitivity(SENSITIVITY); 
+  
+  if (!LoRa.begin(433E6)) {             // initialize ratio at 915 MHz 
+    Serial.println("LoRa init failed. Check your connections."); 
+    while (true);                       // if failed, do nothing 
+  } 
+  Serial.println("LoRa init succeeded."); 
+} 
+void loop() { 
+  if (millis() - lastSendTime > interval) { 
+      float accurrent=0; 
+float current_value = readACCurrentValue(); 
+accurrent=current_value; 
+Serial.print(accurrent); 
+  Serial.println(" A"); 
+  if(accurrent<0.3) 
+  { 
+    accurrent=0; 
+    }  
+  float acvoltage = voltageSensor.getRmsVoltage(); 
+  Serial.print(acvoltage); 
+Serial.println("V"); 
+if(acvoltage<5) 
+  { 
+    acvoltage=0; 
+    } 
+float P = acvoltage * accurrent; 
+  last_time = current_time; 
+  current_time = millis();     
+  long milisec = current_time -last_time; 
+ long sec=milisec/1000; // convert milliseconds to seconds 
+   //dtostrf(Wh, 4, 2, watt);         
+//Serial.write(Wh); 
+    Mymessage = “V:”+String(acvoltage) +"," + “I:” + String(accurrent) + "," + “P:” + String(P);   
+    sendMessage(Mymessage); 
+    delay(100); 
+    Mymessage = ""; 
+        lastSendTime = millis();            // timestamp the message 
+    interval = random(50) + 100;   
+    } 
+  } 
+
+//Receiver module//
+
+#include <SPI.h>              // include libraries 
+#include <LoRa.h> 
+#include <Wire.h> 
+#include <Adafruit_GFX.h> 
+#include <Adafruit_SSD1306.h> 
+ 
+String outgoing;              // outgoing message 
+byte msgCount = 0;            // count of outgoing messages 
+byte localAddress = 0xFF;     // address of this device 
+byte destination = 0xBB;      // destination to send to 
+long lastSendTime = 0;        // last send time 
+int interval = 50;          // interval between sends 
+ 
+#define SCREEN_WIDTH 128 // ORelay display width, in pixels 
+#define SCREEN_HEIGHT 64 // ORelay display height, in pixels 
+ 
+// Declaration for an SSD1306 display connected to I2C (SDA, SCL pins) 
+#define ORelay_RESET     -1 // Reset pin # (or -1 if sharing Arduino reset pin) 
+Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, ORelay_RESET); 
+ 
+void setup() { 
+  Serial.begin(9600);                   // initialize serial; 
+  if (!LoRa.begin(433E6)) {             // initialize ratio at 915 MHz 
+    Serial.println("LoRa init failed. Check your connections."); 
+   while (true);                       // if failed, do nothing 
+  } 
+  Serial.println("LoRa init succeeded."); 
+  display.begin(SSD1306_SWITCHCAPVCC, 0x3C); 
+  delay(2000); 
+  display.clearDisplay(); 
+  display.setTextColor(WHITE); 
+} 
+void loop() { 
+  // parse for a packet, and call onReceive with the result: 
+  onReceive(LoRa.parsePacket()); 
+} 
+void onReceive(int packetSize) { 
+  if (packetSize == 0) return;          // if there's no packet, return 
+  // read packet header bytes: 
+  byte recipient = LoRa.read();          // recipient address 
+  byte sender = LoRa.read();            // sender address 
+  byte incomingMsgId = LoRa.read();     // incoming msg ID 
+  byte incomingLength = LoRa.read();    // incoming msg length 
+ 
+  String incoming = ""; 
+  while (LoRa.available()) { 
+    incoming += (char)LoRa.read(); 
+  } 
+Serial.println(incoming); 
+  if (incomingLength != incoming.length()) {   // check length for error 
+   Serial.println("error: message length does not match length"); 
+   Serial.println(incomingLength); 
+    return;                             // skip rest of function 
+  } 
+  // if the recipient isn't this device or broadcast, 
+  if (recipient != localAddress && recipient != 0xFF) { 
+    Serial.println("This message is not for me."); 
+    return;                             // skip rest of function 
+  } 
+ 
+display.clearDisplay(); 
+  display.setCursor(0,0);   
+  display.setTextSize(2); 
+  display.setTextColor(WHITE); 
+ display.print(incoming); 
+ display.display(); 
+ delay(1000); 
+ incoming=""; 
+}
